@@ -24,6 +24,65 @@ jobs:
 
       - run: pytest -v
 
+  # SAST: rule-based scan of Python code for insecure patterns.
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - run: pip install bandit==1.9.4
+
+      # -ll = report MEDIUM severity and up
+      - run: bandit -r . -x ./tests -ll
+
+  # Dependencies: checks pinned packages against known-vulnerability databases.
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - run: pip install pip-audit==2.10.1
+
+      - run: pip-audit -r requirements.txt -r requirements-dev.txt
+
+  # Secrets: scans every commit in the PR for keys, tokens and passwords.
+  gitleaks:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      # Pinned here, so a tampered release can't ship a matching checksum file.
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # need the PR's commits, not just the latest snapshot
+          persist-credentials: false
+
+      - name: Install gitleaks (checksum verified)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          file="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "$base/$file"
+          echo "${GITLEAKS_SHA256}  $file" | sha256sum --check
+          tar -xzf "$file" gitleaks
+
+      - name: Scan PR commits
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: ./gitleaks git --log-opts="origin/${BASE_REF}..HEAD" --redact --verbose
+
   gate:
     runs-on: ubuntu-latest
     steps:
