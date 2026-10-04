@@ -16,7 +16,6 @@ MODEL = os.environ.get("GATE_MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("GATE_EFFORT", "medium")
 BLOCKING = {"CRITICAL", "HIGH"}
 MAX_DIFF_CHARS = 150_000  # ~40k tokens; bigger diffs get chunked in Phase 6
-SKIP_FILES = ("package-lock.json", "poetry.lock", "uv.lock", "yarn.lock")
 
 SYSTEM_PROMPT = """You are a senior application security engineer reviewing a pull request diff.
 
@@ -55,9 +54,8 @@ class Review(BaseModel):
 
 
 def get_diff(base_branch):
-    excludes = [f":(exclude)**/{name}" for name in SKIP_FILES]
     return subprocess.run(
-        ["git", "diff", f"origin/{base_branch}...HEAD", "--", ".", *excludes],
+        ["git", "diff", f"origin/{base_branch}...HEAD"],
         capture_output=True, text=True, check=True,
     ).stdout
 

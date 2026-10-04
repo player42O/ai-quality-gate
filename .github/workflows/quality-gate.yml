@@ -11,19 +11,34 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # The judge comes from the base branch (trusted), never from the PR,
+      # so a PR can't rewrite the gate that reviews it.
+      - name: Check out trusted gate (base branch)
+        uses: actions/checkout@v4
         with:
+          ref: ${{ github.base_ref }}
+          path: trusted
+
+      # The PR code is only read as data (the diff).
+      - name: Check out PR code
+        uses: actions/checkout@v4
+        with:
+          path: pr
           fetch-depth: 0  # full history, so we can diff against the base branch
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          cache: pip
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install trusted dependencies
+        run: |
+          if [ -f trusted/requirements.txt ]; then
+            pip install -r trusted/requirements.txt
+          fi
 
       - name: Run quality gate
+        working-directory: pr
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python gate.py "${{ github.base_ref }}"
+          BASE_REF: ${{ github.base_ref }}  # via env, not inline, to avoid shell injection
+        run: python ../trusted/gate.py "$BASE_REF"
