@@ -8,37 +8,159 @@ permissions:
   contents: read
 
 jobs:
-  gate:
+  # Unit tests for the PR's own code. No secrets here.
+  tests:
     runs-on: ubuntu-latest
     steps:
-      # The judge comes from the base branch (trusted), never from the PR,
-      # so a PR can't rewrite the gate that reviews it.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false  # PR code runs here; don't leave the token on disk
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements-dev.txt
+
+      - run: pytest -v
+
+  # SAST: rule-based scan of Python code for insecure patterns.
+  bandit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - run: pip install bandit==1.9.4
+
+      # -ll = report MEDIUM severity and up
+      - run: bandit -r . -x ./tests -ll
+
+  # Dependencies: checks pinned packages against known-vulnerability databases.
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - run: pip install pip-audit==2.10.1
+
+      - run: pip-audit -r requirements.txt -r requirements-dev.txt
+
+  # Secrets: scans every commit in the PR for keys, tokens and passwords.
+  gitleaks:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      # Pinned here, so a tampered release can't ship a matching checksum file.
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # need the PR's commits, not just the latest snapshot
+          persist-credentials: false
+
+      - name: Install gitleaks (checksum verified)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          file="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "$base/$file"
+          echo "${GITLEAKS_SHA256}  $file" | sha256sum --check
+          tar -xzf "$file" gitleaks
+
+      - name: Scan PR commits
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: ./gitleaks git --log-opts="origin/${BASE_REF}..HEAD" --redact --verbose
+
+  gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # to post the report as a PR comment
+    steps:
+      # The judge and its rules come from the base branch (trusted), never
+      # from the PR, so a PR can't rewrite the gate that reviews it.
       - name: Check out trusted gate (base branch)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.base_ref }}
           path: trusted
+          persist-credentials: false
 
       # The PR code is only read as data (the diff).
       - name: Check out PR code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: pr
           fetch-depth: 0  # full history, so we can diff against the base branch
+          persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Install trusted dependencies
-        run: |
-          if [ -f trusted/requirements.txt ]; then
-            pip install -r trusted/requirements.txt
-          fi
+        run: pip install -r trusted/requirements.txt
 
       - name: Run quality gate
         working-directory: pr
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BASE_REF: ${{ github.base_ref }}  # via env, not inline, to avoid shell injection
+          GATE_REPORT_DIR: ${{ runner.temp }}/gate-report  # outside the PR checkout
         run: python ../trusted/gate.py "$BASE_REF"
+
+      # --- Reporting: these run even when the gate fails (always) ---
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/gate-report/gate-report.md" ]; then
+            cat "$RUNNER_TEMP/gate-report/gate-report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Comment on PR
+        if: always()
+        continue-on-error: true  # fork PRs get a read-only token; don't fail on that
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f "$RUNNER_TEMP/gate-report/gate-report.md" ]; then
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" \
+              --body-file "$RUNNER_TEMP/gate-report/gate-report.md" --edit-last --create-if-none
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-report
+          path: ${{ runner.temp }}/gate-report
+          if-no-files-found: ignore
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set, skipping Slack"
+            exit 0
+          fi
+          text=$(printf '❌ Quality gate blocked PR: %s\n%s' "$PR_TITLE" "$PR_URL")
+          jq -n --arg text "$text" '{text: $text}' |
+            curl -sSf -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
