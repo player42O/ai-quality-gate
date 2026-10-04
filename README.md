@@ -7,13 +7,32 @@ An AI-powered CI/CD quality gate: no code reaches the `qa` branch unless it pass
 1. Open a PR into `qa`.
 2. GitHub Actions runs `gate.py`, which sends the PR diff to Claude for a security (OWASP Top 10) and quality review.
 3. Claude returns structured JSON findings (severity, file, line, issue, fix).
-4. Any CRITICAL or HIGH finding means FAIL. If the gate itself errors, it also fails (fail closed).
-5. Branch protection blocks the merge unless the gate passes.
+4. The rules in `gate-config.yml` decide PASS or FAIL. If the gate itself errors, it also fails (fail closed).
+5. Branch protection blocks the merge unless both checks pass: `gate` and `tests`.
+
+The gate script and its rules always come from the base branch, so a PR can't loosen its own review.
 
 ## Setup
 
 - Repo secret `ANTHROPIC_API_KEY` (Settings → Secrets and variables → Actions). Set a spend limit on the key.
-- Optional env vars: `GATE_MODEL` (default `claude-opus-5-5`), `GATE_EFFORT` (default `medium`).
+
+## Rules (`gate-config.yml`)
+
+| Key | Meaning | Default |
+|---|---|---|
+| `model` | Claude model | (required) |
+| `effort` | `low` … `max`; higher = more thorough, more tokens | `medium` |
+| `fail_on` | severities that fail the gate | `[CRITICAL, HIGH]` |
+| `max_count` | fail if a severity appears more than N times, e.g. `MEDIUM: 5` | none |
+| `ignore_paths` | git glob patterns not sent to Claude | none |
+| `max_diff_chars` | larger diffs fail with an error | `150000` |
+
+## Development
+
+```
+pip install -r requirements-dev.txt
+pytest
+```
 
 ## Branches
 
@@ -26,7 +45,7 @@ An AI-powered CI/CD quality gate: no code reaches the `qa` branch unless it pass
 |---|---|
 | 1 | Pipeline skeleton + branch protection ✅ |
 | 2 | Claude review script with structured JSON findings ✅ |
-| 3 | Severity rules engine (YAML config) |
+| 3 | Severity rules engine (YAML config) ✅ |
 | 4 | Static tools: bandit, gitleaks, SonarCloud |
 | 5 | Reports + notifications (PR comment, Slack) |
 | 6 | Hardening: prompt injection, big diffs, flaky results |
