@@ -8,33 +8,44 @@ permissions:
   contents: read
 
 jobs:
+  # Unit tests for the PR's own code. No secrets here.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - run: pip install -r requirements-dev.txt
+
+      - run: pytest -v
+
   gate:
     runs-on: ubuntu-latest
     steps:
-      # The judge comes from the base branch (trusted), never from the PR,
-      # so a PR can't rewrite the gate that reviews it.
+      # The judge and its rules come from the base branch (trusted), never
+      # from the PR, so a PR can't rewrite the gate that reviews it.
       - name: Check out trusted gate (base branch)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.base_ref }}
           path: trusted
 
       # The PR code is only read as data (the diff).
       - name: Check out PR code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: pr
           fetch-depth: 0  # full history, so we can diff against the base branch
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Install trusted dependencies
-        run: |
-          if [ -f trusted/requirements.txt ]; then
-            pip install -r trusted/requirements.txt
-          fi
+        run: pip install -r trusted/requirements.txt
 
       - name: Run quality gate
         working-directory: pr
