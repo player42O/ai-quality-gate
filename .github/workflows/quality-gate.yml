@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false  # PR code runs here; don't leave the token on disk
 
       - uses: actions/setup-python@v6
         with:
@@ -32,6 +34,7 @@ jobs:
         with:
           ref: ${{ github.base_ref }}
           path: trusted
+          persist-credentials: false
 
       # The PR code is only read as data (the diff).
       - name: Check out PR code
@@ -39,6 +42,7 @@ jobs:
         with:
           path: pr
           fetch-depth: 0  # full history, so we can diff against the base branch
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:

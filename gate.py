@@ -12,7 +12,7 @@ from typing import Dict, List, Literal
 
 import anthropic
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 CONFIG_PATH = Path(__file__).parent / "gate-config.yml"
 
@@ -40,6 +40,8 @@ Rules:
 
 
 class GateConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # a typo'd key is an error, not silently ignored
+
     model: str
     effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     fail_on: List[Severity] = ["CRITICAL", "HIGH"]

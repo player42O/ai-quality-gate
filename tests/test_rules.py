@@ -44,5 +44,10 @@ def test_unknown_severity_rejected():
         config(fail_on=["SCARY"])
 
 
+def test_typo_key_rejected():
+    with pytest.raises(ValidationError):
+        config(**{"fail-on": ["LOW"]})
+
+
 def test_repo_config_is_valid():
     assert load_config(CONFIG_PATH).model
