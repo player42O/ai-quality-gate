@@ -1,0 +1,23 @@
+name: Quality Gate
+
+on:
+  pull_request:
+    branches: [qa]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history, so we can diff against the base branch
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run quality gate
+        run: python gate.py "${{ github.base_ref }}"
