@@ -36,6 +36,12 @@ def test_pipes_in_model_text_dont_break_the_table():
     assert "a \\| b" in report
 
 
+def test_error_reasons_are_escaped_too():
+    report = render_report("ERROR", None, ["review failed: <img src=x> @admin"])
+    assert "<img" not in report
+    assert "@admin" not in report
+
+
 def test_file_paths_keep_underscores():
     report = render_report("FAIL", review_with(finding(file="tests/test_rules.py")), ["x"])
     assert "`tests/test_rules.py:7`" in report

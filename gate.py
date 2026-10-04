@@ -166,7 +166,7 @@ def render_report(status, review, reasons):
     if status == "ERROR":
         lines.append("The gate could not finish, so the merge is blocked (fail closed).")
     if reasons:
-        lines += ["**Why:**"] + [f"- {r}" for r in reasons] + [""]
+        lines += ["**Why:**"] + [f"- {md(r)}" for r in reasons] + [""]
     if review is None:
         if status == "PASS":
             lines.append("Nothing to review (no reviewable changes).")
