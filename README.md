@@ -22,6 +22,14 @@ An AI-powered CI/CD quality gate: no code reaches the `qa` branch unless it pass
 
 The deterministic tools are consistent and free; Claude catches what rules can't.
 
+## Reports and notifications
+
+Every gate run produces:
+- a **PR comment** with the verdict and findings (updated in place on each push)
+- a **job summary** on the Actions run page
+- a **`gate-report` artifact** (`gate-report.md` + `gate-report.json`)
+- a **Slack message** when the gate fails, if the `SLACK_WEBHOOK_URL` secret is set (optional)
+
 The gate script and its rules always come from the base branch, so a PR can't loosen its own review.
 
 ## Setup
@@ -59,6 +67,6 @@ pytest
 | 2 | Claude review script with structured JSON findings ✅ |
 | 3 | Severity rules engine (YAML config) ✅ |
 | 4 | Static tools: bandit, pip-audit, gitleaks ✅ (SonarCloud optional) |
-| 5 | Reports + notifications (PR comment, Slack) |
+| 5 | Reports + notifications (PR comment, Slack) ✅ |
 | 6 | Hardening: prompt injection, big diffs, flaky results |
 | 7 | Package as a reusable workflow + full docs |
