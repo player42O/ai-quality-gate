@@ -5,10 +5,15 @@ An AI-powered CI/CD quality gate: no code reaches the `qa` branch unless it pass
 ## How it works (today)
 
 1. Open a PR into `qa`.
-2. GitHub Actions runs `gate.py` against the PR diff.
-3. The gate prints PASS or FAIL. Branch protection blocks the merge on FAIL.
+2. GitHub Actions runs `gate.py`, which sends the PR diff to Claude for a security (OWASP Top 10) and quality review.
+3. Claude returns structured JSON findings (severity, file, line, issue, fix).
+4. Any CRITICAL or HIGH finding means FAIL. If the gate itself errors, it also fails (fail closed).
+5. Branch protection blocks the merge unless the gate passes.
 
-Right now the gate is a placeholder that fails on a marker string (see `gate.py`). The Claude audit replaces it in Phase 2.
+## Setup
+
+- Repo secret `ANTHROPIC_API_KEY` (Settings → Secrets and variables → Actions). Set a spend limit on the key.
+- Optional env vars: `GATE_MODEL` (default `claude-opus-5-5`), `GATE_EFFORT` (default `medium`).
 
 ## Branches
 
@@ -20,7 +25,7 @@ Right now the gate is a placeholder that fails on a marker string (see `gate.py`
 | Phase | What |
 |---|---|
 | 1 | Pipeline skeleton + branch protection ✅ |
-| 2 | Claude review script with structured JSON findings |
+| 2 | Claude review script with structured JSON findings ✅ |
 | 3 | Severity rules engine (YAML config) |
 | 4 | Static tools: bandit, gitleaks, SonarCloud |
 | 5 | Reports + notifications (PR comment, Slack) |
