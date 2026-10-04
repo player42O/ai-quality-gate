@@ -15,7 +15,7 @@ def finding(severity="HIGH", title="SQL injection", file="app.py"):
 def test_fail_report_lists_reasons_and_findings():
     report = render_report("FAIL", review_with(finding()), ["1 HIGH finding(s) (fail_on)"])
     assert "❌ AI Quality Gate: FAIL" in report
-    assert "- 1 HIGH finding(s) (fail_on)" in report
+    assert "- 1 HIGH finding\\(s\\) \\(fail\\_on\\)" in report  # escaped; GitHub shows it plainly
     assert "| HIGH | security | `app.py:7` | SQL injection |" in report
 
 
