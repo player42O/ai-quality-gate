@@ -88,8 +88,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write  # to post the report as a PR comment
-    env:
-      REPORT_DIR: ${{ github.workspace }}/gate-report
     steps:
       # The judge and its rules come from the base branch (trusted), never
       # from the PR, so a PR can't rewrite the gate that reviews it.
@@ -120,7 +118,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BASE_REF: ${{ github.base_ref }}  # via env, not inline, to avoid shell injection
-          GATE_REPORT_DIR: ${{ env.REPORT_DIR }}
+          GATE_REPORT_DIR: ${{ runner.temp }}/gate-report  # outside the PR checkout
         run: python ../trusted/gate.py "$BASE_REF"
 
       # --- Reporting: these run even when the gate fails (always) ---
@@ -128,8 +126,8 @@ jobs:
       - name: Job summary
         if: always()
         run: |
-          if [ -f "$REPORT_DIR/gate-report.md" ]; then
-            cat "$REPORT_DIR/gate-report.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$RUNNER_TEMP/gate-report/gate-report.md" ]; then
+            cat "$RUNNER_TEMP/gate-report/gate-report.md" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Comment on PR
@@ -139,9 +137,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          if [ -f "$REPORT_DIR/gate-report.md" ]; then
+          if [ -f "$RUNNER_TEMP/gate-report/gate-report.md" ]; then
             gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" \
-              --body-file "$REPORT_DIR/gate-report.md" --edit-last --create-if-none
+              --body-file "$RUNNER_TEMP/gate-report/gate-report.md" --edit-last --create-if-none
           fi
 
       - name: Upload report
@@ -149,7 +147,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gate-report
-          path: ${{ env.REPORT_DIR }}
+          path: ${{ runner.temp }}/gate-report
           if-no-files-found: ignore
 
       - name: Notify Slack on failure

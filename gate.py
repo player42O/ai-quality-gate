@@ -128,7 +128,7 @@ def run_gate(base_branch):
     try:
         diff = get_diff(base_branch, config.ignore_paths)
     except subprocess.CalledProcessError as e:
-        return "ERROR", None, [f"git diff failed: {e.stderr.strip()}"]
+        return "ERROR", None, [f"git diff failed: {(e.stderr or '').strip()}"]
     if not diff.strip():
         return "PASS", None, []
     if len(diff) > config.max_diff_chars:
@@ -143,9 +143,20 @@ def run_gate(base_branch):
     return ("FAIL" if reasons else "PASS"), review, reasons
 
 
+MD_SPECIAL = "\\`*_[]()!|#"
+
+
 def md(text):
-    """Make model text safe inside a markdown table cell."""
-    return text.replace("|", "\\|").replace("\n", " ").strip()
+    """Make model text inert in markdown: the diff can steer the model's output,
+    so no links, images, HTML, @mentions or table breaks get through."""
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    text = "".join(f"\\{c}" if c in MD_SPECIAL else c for c in text)
+    return text.replace("@", "@\u200b").replace("\n", " ").strip()
+
+
+def code(text):
+    """For text shown inside `code` (file paths): only backticks, pipes and newlines matter."""
+    return text.replace("`", "").replace("|", "\\|").replace("\n", " ").strip()
 
 
 def render_report(status, review, reasons):
@@ -165,10 +176,10 @@ def render_report(status, review, reasons):
     if review.findings:
         lines += ["| Severity | Type | Location | Issue |", "|---|---|---|---|"]
         for f in review.findings:
-            lines.append(f"| {f.severity} | {f.category} | `{md(f.file)}:{f.line}` | {md(f.title)} |")
+            lines.append(f"| {f.severity} | {f.category} | `{code(f.file)}:{f.line}` | {md(f.title)} |")
         lines += ["", "<details><summary>Details and fixes</summary>", ""]
         for f in review.findings:
-            lines += [f"**[{f.severity}] {md(f.title)}** (`{md(f.file)}:{f.line}`)",
+            lines += [f"**[{f.severity}] {md(f.title)}** (`{code(f.file)}:{f.line}`)",
                       f"- Why: {md(f.explanation)}", f"- Fix: {md(f.fix)}", ""]
         lines.append("</details>")
     else:
