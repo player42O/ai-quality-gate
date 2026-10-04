@@ -4,6 +4,8 @@ Exit codes: 0 = PASS, 1 = FAIL (rules broken), 2 = ERROR (the gate couldn't
 run). Errors also block the merge on purpose: "fail closed", so a broken gate
 never lets unreviewed code through.
 """
+import json
+import os
 import subprocess
 import sys
 from collections import Counter
@@ -116,41 +118,88 @@ def review_diff(diff, config):
     return response.parsed_output
 
 
-def main():
-    base_branch = sys.argv[1]
+def run_gate(base_branch):
+    """Run the whole gate. Returns (status, review or None, reasons)."""
     try:
         config = load_config()
     except Exception as e:
-        print(f"ERROR: invalid {CONFIG_PATH.name}: {e}")
-        sys.exit(2)
+        return "ERROR", None, [f"invalid {CONFIG_PATH.name}: {e}"]
 
-    diff = get_diff(base_branch, config.ignore_paths)
+    try:
+        diff = get_diff(base_branch, config.ignore_paths)
+    except subprocess.CalledProcessError as e:
+        return "ERROR", None, [f"git diff failed: {e.stderr.strip()}"]
     if not diff.strip():
-        print("PASS: nothing to review")
-        return
+        return "PASS", None, []
     if len(diff) > config.max_diff_chars:
-        print(f"ERROR: diff too large ({len(diff)} chars, limit {config.max_diff_chars})")
-        sys.exit(2)
+        return "ERROR", None, [f"diff too large ({len(diff)} chars, limit {config.max_diff_chars})"]
 
     try:
         review = review_diff(diff, config)
     except Exception as e:  # any failure blocks the merge (fail closed)
-        print(f"ERROR: gate could not complete the review: {e}")
-        sys.exit(2)
-
-    print(f"\nSummary: {review.summary}\n")
-    for f in review.findings:
-        print(f"[{f.severity}] {f.category} | {f.file}:{f.line} | {f.title}")
-        print(f"    Why: {f.explanation}")
-        print(f"    Fix: {f.fix}")
+        return "ERROR", None, [f"review could not complete: {e}"]
 
     reasons = decide(review.findings, config)
+    return ("FAIL" if reasons else "PASS"), review, reasons
+
+
+def md(text):
+    """Make model text safe inside a markdown table cell."""
+    return text.replace("|", "\\|").replace("\n", " ").strip()
+
+
+def render_report(status, review, reasons):
+    icon = {"PASS": "✅", "FAIL": "❌", "ERROR": "⚠️"}[status]
+    lines = [f"## {icon} AI Quality Gate: {status}", ""]
+
+    if status == "ERROR":
+        lines.append("The gate could not finish, so the merge is blocked (fail closed).")
     if reasons:
-        print("\nFAIL:")
-        for r in reasons:
-            print(f"  - {r}")
-        sys.exit(1)
-    print(f"\nPASS: {len(review.findings)} finding(s), none break the rules")
+        lines += ["**Why:**"] + [f"- {r}" for r in reasons] + [""]
+    if review is None:
+        if status == "PASS":
+            lines.append("Nothing to review (no reviewable changes).")
+        return "\n".join(lines) + "\n"
+
+    lines += [f"> {md(review.summary)}", ""]
+    if review.findings:
+        lines += ["| Severity | Type | Location | Issue |", "|---|---|---|---|"]
+        for f in review.findings:
+            lines.append(f"| {f.severity} | {f.category} | `{md(f.file)}:{f.line}` | {md(f.title)} |")
+        lines += ["", "<details><summary>Details and fixes</summary>", ""]
+        for f in review.findings:
+            lines += [f"**[{f.severity}] {md(f.title)}** (`{md(f.file)}:{f.line}`)",
+                      f"- Why: {md(f.explanation)}", f"- Fix: {md(f.fix)}", ""]
+        lines.append("</details>")
+    else:
+        lines.append("No findings.")
+    return "\n".join(lines) + "\n"
+
+
+def write_reports(status, review, reasons, out_dir):
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "gate-report.md").write_text(render_report(status, review, reasons), encoding="utf-8")
+    data = {"status": status, "reasons": reasons,
+            "review": review.model_dump() if review else None}
+    (out / "gate-report.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def main():
+    status, review, reasons = run_gate(sys.argv[1])
+
+    if review:
+        print(f"\nSummary: {review.summary}\n")
+        for f in review.findings:
+            print(f"[{f.severity}] {f.category} | {f.file}:{f.line} | {f.title}")
+            print(f"    Why: {f.explanation}")
+            print(f"    Fix: {f.fix}")
+    print(f"\n{status}")
+    for r in reasons:
+        print(f"  - {r}")
+
+    write_reports(status, review, reasons, os.environ.get("GATE_REPORT_DIR", "."))
+    sys.exit({"PASS": 0, "FAIL": 1, "ERROR": 2}[status])
 
 
 if __name__ == "__main__":

@@ -85,6 +85,11 @@ jobs:
 
   gate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # to post the report as a PR comment
+    env:
+      REPORT_DIR: ${{ github.workspace }}/gate-report
     steps:
       # The judge and its rules come from the base branch (trusted), never
       # from the PR, so a PR can't rewrite the gate that reviews it.
@@ -115,4 +120,49 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BASE_REF: ${{ github.base_ref }}  # via env, not inline, to avoid shell injection
+          GATE_REPORT_DIR: ${{ env.REPORT_DIR }}
         run: python ../trusted/gate.py "$BASE_REF"
+
+      # --- Reporting: these run even when the gate fails (always) ---
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f "$REPORT_DIR/gate-report.md" ]; then
+            cat "$REPORT_DIR/gate-report.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Comment on PR
+        if: always()
+        continue-on-error: true  # fork PRs get a read-only token; don't fail on that
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -f "$REPORT_DIR/gate-report.md" ]; then
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" \
+              --body-file "$REPORT_DIR/gate-report.md" --edit-last --create-if-none
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gate-report
+          path: ${{ env.REPORT_DIR }}
+          if-no-files-found: ignore
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set, skipping Slack"
+            exit 0
+          fi
+          text=$(printf '❌ Quality gate blocked PR: %s\n%s' "$PR_TITLE" "$PR_URL")
+          jq -n --arg text "$text" '{text: $text}' |
+            curl -sSf -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"
