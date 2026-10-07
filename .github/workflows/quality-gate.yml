@@ -83,7 +83,9 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: ./gitleaks git --log-opts="origin/${BASE_REF}..HEAD" --redact --verbose
 
+  # The paid AI review only runs after the free checks pass.
   gate:
+    needs: [tests, bandit, pip-audit, gitleaks]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -150,17 +152,25 @@ jobs:
           path: ${{ runner.temp }}/gate-report
           if-no-files-found: ignore
 
-      - name: Notify Slack on failure
-        if: failure()
+  # Alerts Slack when ANY check fails, not just the gate.
+  notify:
+    needs: [tests, bandit, pip-audit, gitleaks, gate]
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions: {}  # needs no repo access
+    steps:
+      - name: Notify Slack
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          NEEDS: ${{ toJSON(needs) }}
         run: |
           if [ -z "$SLACK_WEBHOOK_URL" ]; then
             echo "SLACK_WEBHOOK_URL not set, skipping Slack"
             exit 0
           fi
-          text=$(printf '❌ Quality gate blocked PR: %s\n%s' "$PR_TITLE" "$PR_URL")
+          failed=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result == "failure") | .key] | join(", ")')
+          text=$(printf '❌ PR blocked: %s\nFailed checks: %s\n%s' "$PR_TITLE" "$failed" "$PR_URL")
           jq -n --arg text "$text" '{text: $text}' |
             curl -sSf -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL"

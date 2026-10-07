@@ -22,13 +22,15 @@ An AI-powered CI/CD quality gate: no code reaches the `qa` branch unless it pass
 
 The deterministic tools are consistent and free; Claude catches what rules can't.
 
+**Order:** `tests`, `bandit`, `pip-audit` and `gitleaks` run in parallel first. The paid `gate` review runs only if all of them pass, so you never pay for an AI review of code that already failed a free check.
+
 ## Reports and notifications
 
 Every gate run produces:
 - a **PR comment** with the verdict and findings (updated in place on each push)
 - a **job summary** on the Actions run page
 - a **`gate-report` artifact** (`gate-report.md` + `gate-report.json`)
-- a **Slack message** when the gate fails, if the `SLACK_WEBHOOK_URL` secret is set (optional)
+- a **Slack message** when any check fails, listing which ones, if the `SLACK_WEBHOOK_URL` secret is set (optional)
 
 The gate script and its rules always come from the base branch, so a PR can't loosen its own review.
 
